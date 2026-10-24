@@ -7737,7 +7737,7 @@
   status: prototype
   coop_scope:
     players_visible: 'yes'
-    story: 'no'
+    story: partial
     enemies: unknown
     world_state: partial
     items: shared
@@ -7745,15 +7745,16 @@
   networking: steam-relay
   open_source: 'no'
   last_activity: 2026-10
-  qa: none
+  qa: automated
   notes: BepInEx 6 (be.791) plugin for the Steam build (buildid 26046462). Players see each other as capsules and share every grabbable item (grab, carry,
     throw, host-authoritative with smoothing) over ISteamNetworkingMessages on the game's own Steam session, tested by the owner with a friend on two real
-    accounts. Stains, bodies, doors and quest progress are not synced yet, so each player still runs their own job. Source not published yet; details in
-    games/crime-scene-cleaner. QA is bot-driven two-copy runs read by hand plus game-free sync tests, no pass/fail live suite.
+    accounts. Also synced, so far tested only with two game copies on one PC by pass/fail live suites with mutants, are stains and cleaning, bodies and the
+    van, quest progress, doors (key doors, one-side doors), keys, breakable objects and their shards, trash can pickups and trash bags. Leaving the job,
+    the report and money are not synced yet. Source not published yet; details in games/crime-scene-cleaner.
   sources:
   - https://store.steampowered.com/app/1040200/
   - https://www.gamedeveloper.com/press-release/crime-scene-cleaner-release-date-announcement
   - https://builds.bepinex.dev/projects/bepinex_be
   - https://crowdcontrol.live/guides/crimescenecleaner
-  checked: '2026-10-23'
+  checked: '2026-10-24'
   made_with_coop_anything: true

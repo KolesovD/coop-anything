@@ -5,12 +5,22 @@
 | Engine | Unity 2021.3.45f2, IL2CPP, URP (BepInEx 6 bleeding edge, build be.791) |
 | Versions tested | Steam, app 1040200, buildid 26046462, Windows 10; `CrimeCleaner.exe` SHA-256 `e9167a32...4f560173`, `GameAssembly.dll` SHA-256 `8af483d7...ae999fa3847` (full hashes in [NOTES.md](NOTES.md)) |
 | Projects | CSC Coop prototype (this write-up; source not published yet) |
-| QA level | none (bot-driven two-copy runs read by hand, plus the owner's two-account sessions; no pass/fail live suite) |
-| Last updated | 2026-10-23 |
+| QA level | automated (four pass/fail live suites, two real game copies on one PC over loopback, each with a mutant that must fail; players and items also played by the owner on two Steam accounts) |
+| Last updated | 2026-10-24 |
 
 ## Where things stand
 
-A BepInEx plugin lets 2 players (designed for up to 4) cleaning the same job see each other and share every grabbable item over Steam. The owner played three sessions with a friend on two real Steam accounts. Players appear as cyan capsules, and grabbing, carrying and throwing items stays in sync. Stains, bodies, doors, quest progress and the job report are **not** synced. Each player still runs their own mission, so this is not yet co-op play of the game.
+A BepInEx plugin lets 2 players (designed for up to 4) work the same job together. The owner played three sessions with a friend on two real Steam accounts, which covered players and items: players appear as cyan capsules, and grabbing, carrying and throwing items stays in sync.
+
+Since then the plugin also shares the following, tested so far only with two game copies on one PC:
+- blood and other stains, including stains made during play and cleaning progress
+- bodies: carrying, throwing, loading them into the van
+- quest progress
+- doors, including key doors and one-side doors, and the keys themselves
+- breaking objects, with the same shards for everyone
+- trash picked up with the trash can, trash bags, merging bags, loading bags into the van
+
+Leaving the crime scene, the job report and money are **not** synced: each player still ends the job on their own.
 
 ## Existing work
 
@@ -29,7 +39,14 @@ A BepInEx plugin lets 2 players (designed for up to 4) cleaning the same job see
   - `FirstPersonController`: `CanMove` becomes true when the mission intro cutscene ends, and `IsBlocked` also exists.
   - `GrabController`: `GrabbedRb`, `GrabItem(item)`, `TryRelease(Vector3 force)` (a throw), `TryRelease()`.
   - `GrabableItemController`: `Rb`, `startingWorldPosition`, `IsHeld`.
-  - `BodyRagdollController`, `CleaningTarget`, `BloodTarget`, `MissionController`, `Missions`, `SaveSystem`, `PlayerSave`.
+  - Stains: `Taint` (with `CleanableDecal`), created by `BloodSpreaderController.ProjectBlood`; cleaning lowers `Taint.Intensity` and `DestroyDecal` removes the stain.
+  - Bodies: `BodyRagdollController` with `RbToBone` bones, `GrabController.BodyGrabber.GrabBody`, and the van's `TrunkController`, which ends in `GarbageItem.CollectAndDestroy` (the object is switched off, not destroyed).
+  - Quests: PixelCrushers Dialogue System (`QuestLog`, `DialogueLua`), wrapped by `DialogueSystemQuestController`.
+  - Breakables: `DestroyableItem.CrackItem` swaps the item for a prefab of shards (`CreatedCracks`, new grabbable items); `DestroyableObject` breaks into `CrackedObject` parts.
+  - Trash: the trash can is `GarbageCollector` (tool slot `trash`); picked-up `CollectableItem`s are switched off; `SpawnBag` makes a `GarbageBagConnector` bag; bags merge in `GarbageBagConnector.OnCollisionEnter`, limited by perks.
+  - Doors: `ShortcutDoors` with a requirement (AnySide, FrontSide, BackSide, RequireKey, Locked). `IsLocked` is the "not opened yet" flag, and `UnlockDoors()` clears it. Keys go into the player's `KeyHolder` (`ItemInspector.OnKeyCollected` -> `KeyHolder.CollectKey`).
+  - `SaveSystem`, `PlayerSave`.
+- **Method bodies:** Cpp2IL's `--output-as isil` writes the calls of each method, which is enough to find which game function does what. Field names are not resolved there, so findings were confirmed in game with probe plugins.
 - **Saves:** Easy Save 3 files are written **inside the install** (`CrimeCleaner_Data/Saves/<steam id>/Slot1.es3` and `SavesBackups0/`), not under `%USERPROFILE%\AppData\LocalLow`. That folder (`President Studio/CrimeCleaner`) holds only `Player.log`. A copied install therefore has fully separate saves.
 - **Starting a job without menus:** `SaveSystem.Instance.StartGame(1)` from the main menu (`MenuScreen_Nightmare` scene) loads slot 1. The test save went `LoadingScreenScene` → `HubResidence-GameIntro` → the "Dealer's Apartment" job (554 `GrabableItemController` objects).
 - **Several copies on one PC:** a hard-linked second install runs alongside the first. No single-instance mutex or window check was seen. Only `BepInEx/`, `CrimeCleaner_Data/Saves`, `PlayerPrefs.es3`, `KeyBindingSaveFile.es3` and `doorstop_config.ini` need real copies.
@@ -58,26 +75,41 @@ The co-op layer is a BepInEx plugin (`CscCoop.dll`) plus a game-free sync core (
      - Fix: for 5 s after a local throw, the client ignores the host while either copy still moves. Skipped updates are not recorded as known, so the host's final state still arrives.
    - **Bug:** after a throw, the item jumped a short distance once it stopped. Two PCs' physics land it in slightly different places. Fix: if both copies are at rest and 5 cm to 1.5 m apart, the client slides the item to the host's spot over 0.2-0.6 s (smoothstep, kinematic while sliding).
    - **Leaving:** a player who leaves has their held items freed by the host.
+   - **Bug, found by the world suite:** the host's repeated snapshots carry the same version, so a client copy that a player bumped while it rested was never corrected. Fix: a client slides a resting item that drifted back to the host's spot and holds it still until the host moves it or a player picks it up (at most 5 tries per item a minute). Without the hold, a pile of tin cans that settled differently kept knocking itself over.
+4. **Stains.**
+   - Every machine scans the `Taint` objects every 0.25 s. A new stain, a change in intensity or a removal becomes a record: the newest version wins, and a removal is final.
+   - New stains are rebuilt on the other machines with the creator's own `ProjectBlood` arguments, then given the exact transform. A stain both machines made from the same physics event is merged, not doubled.
+   - Scene stains are matched by hierarchy path. Sorting by position failed because stains on furniture settle a fraction of a millimetre differently on each PC.
+   - **Bug:** small cleaning steps (under 0.02) were never sent. Fix: a stain that has stopped changing for 0.6 s sends its exact value.
+5. **Bodies.**
+   - The machine carrying or simulating a body sends all bone poses at 10 Hz; the others follow kinematically and glide. A thrown body is simulated by the thrower until it rests, then by the host.
+   - The host grants each body to one player at a time, so a second player's grab is refused.
+   - The van only counts a body on the machine simulating it. The others replay the game's own van collection, so each machine's quest counts the body once.
+6. **Quests.**
+   - Quest states, quest entries and event variables (such as "room discovered") are shared. Quest states only move forward, flags only turn on, and other values are newest-wins.
+   - Not shared: each player's current room, and the progress counters, which every machine recomputes each frame from its own world.
+   - **Bug:** writing a quest state as text did nothing (the Dialogue System uses lowercase names). Fix: the typed overload, and a warning when the game reads back something else.
+7. **World: doors, keys, breakables, trash, bags.**
+   - Key/value records on the same sync as quests, under their own message type: door open (newest wins); door unlocked, key picked up, item broken, object part broken, trash collected (flags); bag made, bag size, bag merged, item loaded into the van.
+   - Replay goes through the game's own functions: `UnlockDoors`/`OpenDoors`/`CloseDoors`, `KeyHolder.CollectKey` plus hiding the key (as loading a save does), `CrackItem` (the same prefab gives the same shards), `CollectableItem.Collect`, and the trash can's own bag prefab with `SetLevel`.
+   - Objects made during play (shards, broken-off parts, bags) get ids every machine derives the same way, so they join item sync without any extra messages.
+   - Who decides: a hit breaks an item, and two bags merge, only on the machine of the player holding or just throwing it, otherwise on the host. So the thrower's perks decide how far bags merge.
 
 ## QA
 
-- **Game-free core tests:** `dotnet run -c Release` in the core's test project. 34 checks, ALL PASS (2026-10-23). They cover:
-  - codecs, and rejection of bad packets and NaN values
-  - 1 host + 3 clients on loopback with 30% receive loss: every peer converges on every other player's final pose
-  - hold exclusivity, duplicate and late releases, host simulation after a throw
-  - 50 items converging on 4 replicas at 30% loss
-  - late-join snapshot, release-all on leave, rejoin with a restarted counter
-- **Bot-driven two-copy runs on one PC** (loopback UDP; a script launches both and prints the logs; results read by hand, not asserted):
-  - A bot starts the job through `SaveSystem.StartGame(1)` and waits for `CanMove`.
-  - Movement: the host bot walks, and the client logs the moving pose.
-  - Ghost: the capsule's viewport position is logged, and a screenshot is taken when it is centred. The screenshot shows a solid cyan capsule.
-  - Items: the host moved an item and the client logged it in the same place. The client grabbed, carried and threw crates through the game's own `GrabItem`/`TryRelease`. During one throw the client applied 0 corrections from the host, and both copies ended within 1 cm. A forced 0.4 m landing gap slid closed in 0.29 s, with a largest per-frame step of 3.1 cm.
-  - Leaving: a normal host quit logged "player 0 left (bye)", and a killed host logged "left (timeout)".
-- **Real Steam, two accounts** (owner and a friend, reported by the owner, 2026-10-23):
-  - capsules visible
-  - items synced, throws land in the same place, the thrower's throw smooth
-  - capsule removed on quit, held items free to take
-  - landing jump gone after the slide fix
+- **Game-free core tests:** `dotnet run -c Release` in the core's test project. 92 checks, ALL PASS (2026-10-24). They cover codecs and bad packets, pose and item convergence at 30% loss, hold exclusivity, late join and leave. For stains, bodies, quests and world state each, they also cover the merge rules, lossy 4-peer runs with a late joiner that must end identical, and a mutant without the repair cycle that must diverge.
+- **Live suites, pass/fail** (2026-10-24). A script starts two real game copies on one PC over loopback. Bots drive the game's own functions, then each copy prints a state line and the script checks both. Each suite also runs as a mutant, with the client ignoring that feature's messages, and must then fail.
+
+  | Suite | What the bots do | Result | Mutant |
+  |---|---|---|---|
+  | `stain_qa.ps1` | both mop with the real mop, bleed, leave blood, mop a scene stain | PASS (twice, identical digest) | FAIL (5) |
+  | `body_qa.ps1` | host loads a body into the van; client carries and throws one; grab conflict; host carries it last | PASS | FAIL (4) |
+  | `quest_qa.ps1` | quests started and finished on either side, a conflict, a step backwards, the client discovers a room | PASS | FAIL (4) |
+  | `world_qa.ps1` | doors opened and closed from both sides; one-side door from front and back; key taken by the host, key door opened by the client; bottles broken by impact on each side; plank broken; trash can on both sides (the client picks up a shard of the host's bottle); bags merged and loaded into the van | PASS (20 checks; shards within 0.01 m) | FAIL (14) |
+
+  After each new feature the earlier suites were run again and passed.
+- **Earlier bot runs read by hand:** movement, ghost screenshot (a solid cyan capsule), item throws (0 corrections during a throw, copies within 1 cm), host quit and host kill.
+- **Real Steam, two accounts** (owner and a friend, reported by the owner, 2026-10-23): capsules visible; items synced, and throws land in the same place and look smooth; capsule removed on quit, and held items free to take; landing jump gone after the slide fix. Stains, bodies, quests and world state have **not** been tried over Steam yet.
 
 ## How to play
 
@@ -85,16 +117,24 @@ There is no release yet. The test kit is BepInEx be.791 plus the two plugin DLLs
 
 ## Known issues
 
-- Only player positions and grabbable items are shared. Stains, blood, bodies, doors, tools, garbage bags, the ozonator, quest progress, money and the job report are each player's own.
+- Leaving the crime scene, the job report, money and saves are each player's own.
+- Not tried over Steam yet: stains, bodies, quests, doors, keys, breakables, trash and bags (only two copies on one PC).
+- Only 2 players tested; 3 and 4 are designed for but have never been run.
+- Not exercised:
+  - other cleaning tools (sponge, power washer, detergent)
+  - the dealer's body (not grabbable at job start)
+  - a real bag-on-bag merge (needs a perk; the test triggered the merge directly)
+  - the game's own key pickup screen (the bot puts the key in the holder)
+  - lockpicked and card-reader doors
+  - dialogue state
 - Players see each other as plain capsules, with no character model or animation.
 - No lobby or invite: SteamID64s are typed into a config file by hand.
 - The client trusts its own claim of who sent a packet. That is fine between friends, but there is no protection against a cheating player.
-- Every player must load the same job from a save that is in the same state. The item table only matches if the scene and its items are the same.
+- Every player must load the same job from a save in the same state: scene items, stains, bodies and doors are matched by their place in the scene.
 
 ## Next steps
 
-1. **Bodies:** `BodyRagdollController` and `BodyPartController`, which use their own grab path (`GrabController.TryGetBody`).
-2. **Cleaning state:** `CleaningTarget` and `BloodTarget`. Every stain cleaned on one PC must disappear on the others. This is monotonic, so it fits numbered, acknowledged events (see [effect-capture-story-sync](../../playbook/effect-capture-story-sync.md)).
-3. **Quest progress and the end-of-job report:** `MissionController`, the `MainGame` quest events.
-4. **Lobbies and invites** instead of hand-typed SteamIDs. Then a real 3- and 4-player test.
-5. **A pass/fail live suite:** turn the current log-reading runs into asserted checks, so the QA level can become `automated`.
+1. **Steam test** of everything added since the first sessions, with the friend.
+2. **Ending the job together:** "Leave Crime Scene", the report, money and saves.
+3. **Lobbies and invites** instead of hand-typed SteamIDs. Then a real 3- and 4-player test.
+4. **Publish the source** in its own repository and link it here.
