@@ -7749,12 +7749,14 @@
   notes: BepInEx 6 (be.791) plugin for the Steam build (buildid 26046462). Players see each other as capsules and share every grabbable item (grab, carry,
     throw, host-authoritative with smoothing) over ISteamNetworkingMessages on the game's own Steam session, tested by the owner with a friend on two real
     accounts. Also synced, so far tested only with two game copies on one PC by pass/fail live suites with mutants, are stains and cleaning, bodies and the
-    van, quest progress, doors (key doors, one-side doors), keys, breakable objects and their shards, trash can pickups and trash bags. Leaving the job,
-    the report and money are not synced yet. Source not published yet; details in games/crime-scene-cleaner.
+    van, quest progress, doors (key, card-reader and one-side doors), keys, breakable objects and their shards, trash and trash bags, each player's own
+    bucket, lamp and power washer with cleaning products, valuables, evidence, and leaving the job together (everyone gets the report and pay). Players
+    meet in a Steam lobby and follow the host into jobs; lobby creation was checked on one Steam account, joining not yet. Source not published yet;
+    details in games/crime-scene-cleaner.
   sources:
   - https://store.steampowered.com/app/1040200/
   - https://www.gamedeveloper.com/press-release/crime-scene-cleaner-release-date-announcement
   - https://builds.bepinex.dev/projects/bepinex_be
   - https://crowdcontrol.live/guides/crimescenecleaner
-  checked: '2026-10-24'
+  checked: '2026-10-25'
   made_with_coop_anything: true
